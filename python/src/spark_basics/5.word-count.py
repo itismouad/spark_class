@@ -2,7 +2,7 @@ import os, sys
 from pyspark import SparkConf, SparkContext
 
 # configuration & initialization of the spark context
-conf = SparkConf().setMaster("local").setAppName("FriendsByAge")
+conf = SparkConf().setMaster("local").setAppName("WordCount")
 sc = SparkContext(conf = conf)
 
 input = sc.textFile(os.path.join(os.environ['HOME'], "github/spark_class/data/book.txt"))

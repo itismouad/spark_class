@@ -1,26 +1,37 @@
-#Boilerplate stuff:
+import os, sys
+import codecs
 from pyspark import SparkConf, SparkContext
 
+# configuration & initialization of the spark context
 conf = SparkConf().setMaster("local").setAppName("DegreesOfSeparation")
 sc = SparkContext(conf = conf)
 
 # The characters we wish to find the degree of separation between:
-startCharacterID = 5306 #SpiderMan
-targetCharacterID = 14  #ADAM 3,031 (who?)
+startCharacterID = 5306
+targetCharacterID = 14
 
 # Our accumulator, used to signal when we find the target character during
 # our BFS traversal.
 hitCounter = sc.accumulator(0)
 
-def convertToBFS(line):
+
+# define function(s)
+def initializeBFS(line):
+    """
+    Converts each line of the RDD into BFS meaning from
+    FROM input type = movie ID then all the connections
+    TO output type = (heroID, (connections, distance, color))
+    """
     fields = line.split()
+
     heroID = int(fields[0])
+
     connections = []
     for connection in fields[1:]:
         connections.append(int(connection))
 
-    color = 'WHITE'
-    distance = 9999
+    color = 'WHITE' # WHITE = UNPROCESSED
+    distance = 9999 # means it is indefinitely distant when we start
 
     if (heroID == startCharacterID):
         color = 'GRAY'
@@ -30,10 +41,21 @@ def convertToBFS(line):
 
 
 def createStartingRdd():
-    inputFile = sc.textFile("file:///sparkcourse/marvel-graph.txt")
-    return inputFile.map(convertToBFS)
+    """
+    Reads text file and initialize BFS nodes into an RDD format
+    """
+    filename = os.path.join(os.environ['HOME'], "github/spark_class/data/marvel-graph.txt")
+    inputFile = sc.textFile(filename)
+    return inputFile.map(initializeBFS)
+
 
 def bfsMap(node):
+    """
+    Looks at a node = line and process it depending on the status.
+    i.e. it is a MAPPER
+    FROM input type = (heroID, (connections, distance, color))
+    TO output type = [list of nodes with the current node + all the connections it has]
+    """
     characterID = node[0]
     data = node[1]
     connections = data[0]
@@ -42,7 +64,7 @@ def bfsMap(node):
 
     results = []
 
-    #If this node needs to be expanded...
+    # If this node needs to be expanded...
     if (color == 'GRAY'):
         for connection in connections:
             newCharacterID = connection
@@ -54,14 +76,21 @@ def bfsMap(node):
             newEntry = (newCharacterID, ([], newDistance, newColor))
             results.append(newEntry)
 
-        #We've processed this node, so color it black
+        # We've processed this node, so color it black
         color = 'BLACK'
 
-    #Emit the input node so we don't lose it.
+    # Emit the input node so we don't lose it.
     results.append( (characterID, (connections, distance, color)) )
     return results
 
+
 def bfsReduce(data1, data2):
+    """
+    Combines together all nodes with the same heroID
+    i.e. it is a REDUCER
+    FROM input type = [list of nodes with a node + all the connections it has]
+    TO output type = [reduced list of nodes with unique heroID - we only keep the shortest distance and the darkest colour found]
+    """
     edges1 = data1[0]
     edges2 = data2[0]
     distance1 = data1[1]
@@ -103,11 +132,11 @@ def bfsReduce(data1, data2):
     return (edges, distance, color)
 
 
-#Main program here:
+# Main program here:
 iterationRdd = createStartingRdd()
 
 for iteration in range(0, 10):
-    print("Running BFS iteration# " + str(iteration+1))
+    print("Running BFS iteration  #" + str(iteration+1))
 
     # Create new vertices as needed to darken or reduce distances in the
     # reduce stage. If we encounter the node we're looking for as a GRAY
