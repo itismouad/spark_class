@@ -19,8 +19,10 @@ parsedLines = lines.map(parseLine)
 # get min temprature in dataset for each stationID
 # input type = (stationID, entryType, temperature)
 # output type = (stationID, min temperature)
+# -- MAP --
 minTemps = parsedLines.filter(lambda x: "TMIN" in x[1])
 stationTemps = minTemps.map(lambda x: (x[0], x[2]))
+# -- REDUCE -- 
 minTemps = stationTemps.reduceByKey(lambda x, y: min(x,y))
 
 # collect and display results
