@@ -9,8 +9,8 @@ tree structure :
  - `README.md`
  - `data`
  - `python`
-  - `notebooks`
-  - `src`
+    - `notebooks`
+    - `src`
 
 ### Credits
 
