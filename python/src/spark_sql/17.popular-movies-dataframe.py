@@ -1,38 +1,37 @@
-from pyspark.sql import SparkSession
-from pyspark.sql import Row
-from pyspark.sql import functions
+import os, sys
+from pyspark.sql import SparkSession, Row, functions
 
-def loadMovieNames():
+# Create a SparkSession that will give us both a Spark context and a SQL context
+spark = SparkSession.builder.appName("SparkSQL").getOrCreate()
+sc = spark.sparkContext
+
+# define filenames
+ratings_filename = os.path.join(os.environ['HOME'], "github/spark_class/data/ml-100k/u.data")
+movie_filename = os.path.join(os.environ['HOME'], "github/spark_class/data/ml-100k/u.ITEM")
+
+# define function(s)
+def loadMovieNames(movie_filename):
     movieNames = {}
-    with open("ml-100k/u.ITEM") as f:
+    with open(movie_filename, "r", encoding='ascii', errors='ignore') as f:
         for line in f:
             fields = line.split('|')
             movieNames[int(fields[0])] = fields[1]
     return movieNames
 
-# Create a SparkSession (the config bit is only for Windows!)
-spark = SparkSession.builder.config("spark.sql.warehouse.dir", "file:///C:/temp").appName("PopularMovies").getOrCreate()
+# Load data files into an RDD and a dictionar
+lines = sc.textFile(ratings_filename)
+nameDict = loadMovieNames(movie_filename)
 
-# Load up our movie ID -> name dictionary
-nameDict = loadMovieNames()
-
-# Get the raw data
-lines = spark.sparkContext.textFile("file:///SparkCourse/ml-100k/u.data")
-# Convert it to a RDD of Row objects
+# Convert it to a RDD of Row objects, then a DataFrame
 movies = lines.map(lambda x: Row(movieID =int(x.split()[1])))
-# Convert that to a DataFrame
 movieDataset = spark.createDataFrame(movies)
 
-# Some SQL-style magic to sort all movies by popularity in one line!
-topMovieIDs = movieDataset.groupBy("movieID").count().orderBy("count", ascending=False).cache()
-
-# Show the results at this point:
-
-#|movieID|count|
-#+-------+-----+
-#|     50|  584|
-#|    258|  509|
-#|    100|  508|
+topMovieIDs = (movieDataset
+                .groupBy("movieID")
+                .count()
+                .orderBy("count", ascending=False)
+                .cache()
+                )
 
 topMovieIDs.show()
 

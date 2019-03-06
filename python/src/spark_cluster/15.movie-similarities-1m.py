@@ -1,35 +1,49 @@
-import sys
-from pyspark import SparkConf, SparkContext
+import os, sys
 from math import sqrt
+from pyspark import SparkConf, SparkContext
 
 #To run on EMR successfully + output results for Star Wars:
 #aws s3 cp s3://sundog-spark/MovieSimilarities1M.py ./
 #aws s3 sp c3://sundog-spark/ml-1m/movies.dat ./
 #spark-submit --executor-memory 1g MovieSimilarities1M.py 260
 
-def loadMovieNames():
+# define filenames and data
+ratings_filename = "ml-1m/ratings.dat"
+movie_filename = "movies.dat"
+
+# define function(s)
+def loadMovieNames(movie_filename):
     movieNames = {}
-    with open("movies.dat", encoding='ascii', errors='ignore') as f:
+    with open(movie_filename, "r", encoding='ascii', errors='ignore') as f:
         for line in f:
-            fields = line.split("::")
+            fields = line.split('|')
             movieNames[int(fields[0])] = fields[1]
     return movieNames
 
-#Python 3 doesn't let you pass around unpacked tuples,
-#so we explicitly extract the ratings now.
 def makePairs( userRatings ):
+    '''
+    reformat tuples
+    '''
     ratings = userRatings[1]
     (movie1, rating1) = ratings[0]
     (movie2, rating2) = ratings[1]
     return ((movie1, movie2), (rating1, rating2))
 
 def filterDuplicates( userRatings ):
+    '''
+    filter duplicates by only having tuples in the format movieID_1 < movieID_2
+    '''
     ratings = userRatings[1]
     (movie1, rating1) = ratings[0]
     (movie2, rating2) = ratings[1]
     return movie1 < movie2
 
 def computeCosineSimilarity(ratingPairs):
+    '''
+    Compute cosine similiarities
+    ratingPairs = ((movie1, movie2), (rating1, rating2))
+    result = ((movie1, movie2), (score, numPairs))
+    '''
     numPairs = 0
     sum_xx = sum_yy = sum_xy = 0
     for ratingX, ratingY in ratingPairs:
@@ -47,48 +61,51 @@ def computeCosineSimilarity(ratingPairs):
 
     return (score, numPairs)
 
+# Loading data
+ratings_data = sc.textFile(ratings_filename)
+names_data = loadMovieNames(movie_filename)
 
-conf = SparkConf()
-sc = SparkContext(conf = conf)
+# -- MAP --
+# ratings to key / value pairs
+# input type = RDD line
+# output type = (userID, (movieID, rating))
+ratings = (ratings_data
+                .map(lambda l: l.split())
+                .map(lambda l: (int(l[0]), (int(l[1]), float(l[2]))))
+                )
 
-print("\nLoading movie names...")
-nameDict = loadMovieNames()
+# -- JOIN --
+# We use self-`join` to find every combination of userID
+# input type = (userID, (movieID, rating))
+# output type = (userID, ((movie1, rating1), (movie2, rating2))
+joinedRatings = ratings.join(ratings)
 
-data = sc.textFile("s3n://sundog-spark/ml-1m/ratings.dat")
 
-# Map ratings to key / value pairs: user ID => movie ID, rating
-ratings = data.map(lambda l: l.split("::")).map(lambda l: (int(l[0]), (int(l[1]), float(l[2]))))
-
-# Emit every movie rated together by the same user.
-# Self-join to find every combination.
-ratingsPartitioned = ratings.partitionBy(100)
-joinedRatings = ratingsPartitioned.join(ratingsPartitioned)
-
-# At this point our RDD consists of userID => ((movieID, rating), (movieID, rating))
-
+# -- FILTER DUPLICATES --
 # Filter out duplicate pairs
 uniqueJoinedRatings = joinedRatings.filter(filterDuplicates)
 
 # Now key by (movie1, movie2) pairs.
-moviePairs = uniqueJoinedRatings.map(makePairs).partitionBy(100)
+# input type = (userID, ((movie1, rating1), (movie2, rating2))
+# output type = ((movie1, movie2), (rating1, rating2))
+moviePairs = uniqueJoinedRatings.map(makePairs)
 
-# We now have (movie1, movie2) => (rating1, rating2)
+
 # Now collect all ratings for each movie pair and compute similarity
+# input type = ((movie1, movie2), (rating1, rating2))
+# output type = ((movie1, movie2), (score, numPairs))
 moviePairRatings = moviePairs.groupByKey()
-
-# We now have (movie1, movie2) = > (rating1, rating2), (rating1, rating2) ...
-# Can now compute similarities.
-moviePairSimilarities = moviePairRatings.mapValues(computeCosineSimilarity).persist()
+moviePairSimilarities = moviePairRatings.mapValues(computeCosineSimilarity).cache()
 
 # Save the results if desired
-moviePairSimilarities.sortByKey()
-moviePairSimilarities.saveAsTextFile("movie-sims")
+# moviePairSimilarities.sortByKey()
+# moviePairSimilarities.saveAsTextFile("movie-sims")
 
 # Extract similarities for the movie we care about that are "good".
 if (len(sys.argv) > 1):
 
     scoreThreshold = 0.97
-    coOccurenceThreshold = 1000
+    coOccurenceThreshold = 50
 
     movieID = int(sys.argv[1])
 
@@ -101,11 +118,11 @@ if (len(sys.argv) > 1):
     # Sort by quality score.
     results = filteredResults.map(lambda pairSim: (pairSim[1], pairSim[0])).sortByKey(ascending = False).take(10)
 
-    print("Top 10 similar movies for " + nameDict[movieID])
+    print("Top 10 similar movies for " + names_data[movieID])
     for result in results:
         (sim, pair) = result
         # Display the similarity result that isn't the movie we're looking at
         similarMovieID = pair[0]
         if (similarMovieID == movieID):
             similarMovieID = pair[1]
-        print(nameDict[similarMovieID] + "\tscore: " + str(sim[0]) + "\tstrength: " + str(sim[1]))
+        print(names_data[similarMovieID] + "\tscore: " + str(sim[0]) + "\tstrength: " + str(sim[1]))

@@ -1,19 +1,29 @@
+import os, sys
+import collections
 from pyspark.sql import SparkSession
 from pyspark.sql import Row
 
-import collections
+# Create a SparkSession that will give us both a Spark context and a SQL context
+spark = SparkSession.builder.appName("SparkSQL").getOrCreate()
+sc = spark.sparkContext
 
-# Create a SparkSession (Note, the config section is only for Windows!)
-spark = SparkSession.builder.config("spark.sql.warehouse.dir", "file:///C:/temp").appName("SparkSQL").getOrCreate()
+filename = os.path.join(os.environ['HOME'], "github/spark_class/data/fakefriends.csv")
 
+# define function(s)
 def mapper(line):
+    '''
+    Take an RDD value (=line) and converts it to a DataFrame Row
+    '''
     fields = line.split(',')
     return Row(ID=int(fields[0]), name=str(fields[1].encode("utf-8")), age=int(fields[2]), numFriends=int(fields[3]))
 
-lines = spark.sparkContext.textFile("fakefriends.csv")
+# Reading as an RDD (`line`) then transforming it as a DataFrame `people`
+# by converting every line in a Row of 4 fields (ID, name, age, numFriends)
+lines = sc.textFile(filename)
 people = lines.map(mapper)
 
-# Infer the schema, and register the DataFrame as a table.
+# Infer the schema
+# Register the DataFrame as a table.
 schemaPeople = spark.createDataFrame(people).cache()
 schemaPeople.createOrReplaceTempView("people")
 
@@ -24,7 +34,7 @@ teenagers = spark.sql("SELECT * FROM people WHERE age >= 13 AND age <= 19")
 for teen in teenagers.collect():
   print(teen)
 
-# We can also use functions instead of SQL queries:
+# We can also use functions (mirrored on classic pandas functions) instead of SQL queries:
 schemaPeople.groupBy("age").count().orderBy("age").show()
 
 spark.stop()
