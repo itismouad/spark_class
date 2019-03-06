@@ -3,12 +3,14 @@
 Location to my spark tutorial files and prototypes
 
 ### Contents
-.
-├── README.md
-├── data│      
-└── python
-    ├── notebooks
-    └── src
+
+tree structure :
+
+ - `README.md`
+ - `data`
+ - `python`
+  - `notebooks`
+  - `src`
 
 ### Credits
 
